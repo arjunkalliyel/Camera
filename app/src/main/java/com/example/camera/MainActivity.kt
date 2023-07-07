@@ -1,170 +1,126 @@
 package com.example.camera
 
-import android.app.Activity
-import android.content.ActivityNotFoundException
-import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.Color
+import android.Manifest
 import android.net.Uri
-import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
-import android.provider.MediaStore
-import android.provider.Settings
+import android.os.Environment
+import android.util.Log
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
-import coil.load
-import coil.transform.CircleCropTransformation
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.FileProvider
 import com.example.camera.databinding.ActivityMainBinding
-import com.karumi.dexter.Dexter
-import com.karumi.dexter.MultiplePermissionsReport
-import com.karumi.dexter.PermissionToken
-import com.karumi.dexter.listener.PermissionDeniedResponse
-import com.karumi.dexter.listener.PermissionGrantedResponse
-import com.karumi.dexter.listener.PermissionRequest
-import com.karumi.dexter.listener.multi.MultiplePermissionsListener
-import com.karumi.dexter.listener.single.PermissionListener
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
-    private val CAMERA_REQUEST_CODE = 1
-    private val GALLERY_REQUEST_CODE = 2
+    private var photoUri: Uri? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding=ActivityMainBinding.inflate(layoutInflater)
+        binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-
+        rePermissions()
         binding.btnCamera.setOnClickListener {
-            cameraCheckPermission()
+            openCamera()
         }
         binding.btnGallery.setOnClickListener {
-            galleryCheckPermission()
+            openGallery()
         }
-        binding.imageView.setOnClickListener{
+        binding.imageView.setOnClickListener {
             val pictureDialog = AlertDialog.Builder(this)
             pictureDialog.setTitle("Select Action")
-            val pictureDialogItem = arrayOf("Select photo from Gallery", "Capture photo from Camera")
-            pictureDialog.setItems(pictureDialogItem){ dialog, which ->
-                when (which){
-                    0 -> gallery()
-                    1 -> camera()
+            val pictureDialogItem =
+                arrayOf("Select photo from Gallery", "Capture photo from Camera")
+            pictureDialog.setItems(pictureDialogItem) { dialog, which ->
+                when (which) {
+                    0 -> openGallery()
+                    1 -> openCamera()
                 }
             }
             pictureDialog.show()
         }
+
     }
-    private fun galleryCheckPermission() {
-        Dexter.withContext(this).withPermission(
-            android.Manifest.permission.READ_EXTERNAL_STORAGE
-        ).withListener(object : PermissionListener {
-            override fun onPermissionGranted(p0: PermissionGrantedResponse?) {
-                gallery()
+
+    private val getContent =
+        registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+            // handle the result here
+            if (uri != null) {
+                displayImage(uri)
             }
-
-            override fun onPermissionDenied(p0: PermissionDeniedResponse?) {
-                Toast.makeText(
-                    this@MainActivity,
-                    "You have denied the storage permission to select image",
-                    Toast.LENGTH_SHORT
-                ).show()
-                showRotationalDialogForPermission()
-            }
-
-            override fun onPermissionRationaleShouldBeShown(
-                p0: PermissionRequest?, p1: PermissionToken?) {
-                showRotationalDialogForPermission()
-            }
-        }).onSameThread().check()
-    }
-
-    private fun gallery() {
-        val intent = Intent(Intent.ACTION_PICK)
-        intent.type = "image/*"
-        startActivityForResult(intent, GALLERY_REQUEST_CODE)
-    }
-    private fun cameraCheckPermission() {
-        Dexter.withContext(this)
-            .withPermissions(
-                android.Manifest.permission.READ_EXTERNAL_STORAGE,
-                android.Manifest.permission.CAMERA).withListener(
-
-                object : MultiplePermissionsListener {
-                    override fun onPermissionsChecked(report: MultiplePermissionsReport?) {
-                        report?.let {
-
-                            if (report.areAllPermissionsGranted()) {
-                                camera()
-                            }
-
-                        }
-                    }
-
-                    override fun onPermissionRationaleShouldBeShown(
-                        p0: MutableList<PermissionRequest>?,
-                        p1: PermissionToken?) {
-                        showRotationalDialogForPermission()
-                    }
-
-                }
-            ).onSameThread().check()
-
-    }
-    private fun camera() {
-        val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
-        startActivityForResult(intent, CAMERA_REQUEST_CODE)
-    }
-    private fun showRotationalDialogForPermission() {
-        AlertDialog.Builder(this)
-            .setMessage("It looks like you have turned off permissions"
-                    + "required for this feature. It can be enable under App settings!!!")
-
-            .setPositiveButton("Go TO SETTINGS") { _, _ ->
-
-                try {
-                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                    val uri = Uri.fromParts("package", packageName, null)
-                    intent.data = uri
-                    startActivity(intent)
-
-                } catch (e: ActivityNotFoundException) {
-                    e.printStackTrace()
-                }
-            }
-
-            .setNegativeButton("CANCEL") { dialog, _ ->
-                dialog.dismiss()
-            }.show()
-    }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-
-        if (resultCode == Activity.RESULT_OK) {
-
-            when (requestCode) {
-
-                CAMERA_REQUEST_CODE -> {
-
-                    val bitmap = data?.extras?.get("data") as Bitmap
-
-                    //we are using coroutine image loader (coil)
-                    binding.imageView.load(bitmap) {
-                        crossfade(true)
-                        crossfade(1000)
-                    }
-                }
-
-                GALLERY_REQUEST_CODE -> {
-
-                    binding.imageView.load(data?.data) {
-                        crossfade(true)
-                        crossfade(1000)
-                    }
-
-                }
-            }
-
+            Log.e("image", "image is $uri")
         }
 
+    private fun openGallery() {
+        getContent.launch("image/*")
+    }
+
+    private val takePicture =
+        registerForActivityResult(ActivityResultContracts.TakePicture()) { isSuccess: Boolean ->
+            if (isSuccess) {
+                photoUri?.let { displayImage(it) }
+                // handle the successful result here
+            } else {
+                // handle the failed result here
+                Toast.makeText(this, "Capture Failed", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+    private fun displayImage(image: Uri) {
+        binding.imageView.setImageURI(image)
+    }
+
+    private fun openCamera() {
+        photoUri = getOutputMediaFileUri()
+        takePicture.launch(photoUri)
+    }
+
+    private fun getOutputMediaFileUri(): Uri {
+        val mediaStorageDir = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+            "Camera Pro"
+        )
+        if (!mediaStorageDir.exists()) {
+            mediaStorageDir.mkdirs()
+        }
+        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val mediaFile = File(mediaStorageDir.path + File.separator + "IMG_" + timeStamp + ".jpg")
+        return FileProvider.getUriForFile(
+            this,
+            "${BuildConfig.APPLICATION_ID}.provider",
+            mediaFile
+        )
+    }
+
+    private fun rePermissions() {
+        val permissionRequest = registerForActivityResult(
+            ActivityResultContracts.RequestMultiplePermissions()
+        ) { permissions ->
+            when {
+                permissions.getOrDefault(Manifest.permission.READ_EXTERNAL_STORAGE, false) -> {
+
+                }
+
+                permissions.getOrDefault(Manifest.permission.CAMERA, false) -> {
+
+                }
+
+                else -> {
+
+                }
+            }
+        }
+        permissionRequest.launch(
+            arrayOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.CAMERA
+            )
+        )
     }
 }
